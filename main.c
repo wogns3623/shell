@@ -23,7 +23,7 @@ typedef enum {
 
 typedef enum {
     DEFAULT = 0,
-    CONTINUE,
+    APPEND,
     OVERWRITE
 } redir_opt;
 
@@ -49,18 +49,37 @@ typedef struct {
 } history;
 
 history his;
+struct termios old, new;
+int run = 1;
+int noclobber;
 
-// FILE *logfile;
+void his_add(history *hist, char* comm) {
+    strcpy(hist->queue[hist->in], comm);
+    if (hist->count == HIS_SIZE)
+        hist->out = (hist->out+1)%HIS_SIZE;
+    else
+        hist->count++;
 
-void his_add(history his, char* comm) {
-    strcpy(his.queue[his.in], comm);
-    if (his.count == HIS_SIZE)
-        his.out = (his.out+1)%HIS_SIZE;
-    else 
-        his.count++;
-
-    his.in = (his.in+1)%HIS_SIZE;
+    hist->in = (hist->in+1)%HIS_SIZE;
 }
+
+/**
+ * 0부터 his.count까지를 내부적으로 history.queue의 처음부터 끝까지 매핑시켜준다
+ * his_at(0) = history.queue[his.out]
+ * his_at(his.count-1) = history.queue[his.in-1]
+ * his_at(his.count) = history.current;
+ */
+char *his_at(history *hist, int location) {
+    if (location > hist->count) { // out of index error
+        perror("OUT OF INDEX ERROR");
+        exit(1);
+    } else if (location == hist->count) {
+        return hist->current;
+    } else { // 0~his.count-1;
+        return hist->queue[(hist->out+location)%HIS_SIZE];
+    }
+}
+
 void cur_right() {
     fputc(27, stdout);
     fputc(91, stdout);
@@ -73,16 +92,13 @@ void cur_left() {
 }
 int getcom(char *com_buf);
 int parse(char *com_buf);
-int execute(command com);
+int execute(command *com, command *com_old);
 
 int main(int argc, char *argv[]) {
-    int run = 1;
     char com_buf[BUF_SIZE];
-    // logfile = fopen("log.txt", "w");
 
     if (argc == 1) { // run shell
         // setting terminal
-        struct termios old, new;
         tcgetattr(0, &old);
         new = old;
         new.c_lflag &= ~ICANON & ~ECHO;
@@ -145,8 +161,12 @@ int getcom(char *com_buf) {
                 // 이전 명령어를 불러옴
                 // history배열에서 current로 불러옴
                 case 65: // up
+                    // if (his.cur > 0) {
+
+                    // }
                     break;
                 case 66: // down
+
                     break;
                 
                 // 줄의 임의 위치에 커서를 옮길 수 있어야 함
@@ -206,13 +226,10 @@ int getcom(char *com_buf) {
         }
     }
     fputc('\n', stdout);
-    his_add(his, com_buf);
 
     return buf_len;
 }
 
-// 명령어가 남아있으면 1을 리턴
-// 문자열을 끝까지 처리했으면 0을 리턴
 int parse(char *com_buf) {
     int eoc = 1;
     int retval = 0;
@@ -222,15 +239,41 @@ int parse(char *com_buf) {
     char **save_location;
     parse_state state = GET_COMMAND;
 
+    command *com_old = malloc(sizeof(command));
     command *com = malloc(sizeof(command));
+    memset(com_old, 0, sizeof(command));
     memset(com, 0, sizeof(command));
+    
+    //check !
+
+    char location[5];
+    char *histmp, *tmpbuf;
+    while (1) {
+        histmp = strchr(com_buf, '!');
+        if (histmp == NULL) break;
+        else {
+            int i;
+            for (i=1; '0' <= histmp[i] && histmp[i] <= '9'; i++);
+            strncpy(location, histmp+1, i);
+            char *token = his_at(&his, atoi(location)-1);
+            printf("|%s|\n", token);
+            
+            tmpbuf = malloc(sizeof(char)*strlen(histmp+i));
+            strcpy(tmpbuf, histmp+i);
+            printf("|%s|\n", tmpbuf);
+
+            strcpy(histmp, token);
+            strcat(histmp, tmpbuf);
+            printf("|%s|\n", histmp);
+            printf("|%s|\n", com_buf);
+        }
+    }
+    
+    his_add(&his, com_buf);
     
     while (eoc) {
         switch (state) {
         case GET_SPECIAL_CHARACTER:
-
-            if (com_buf[buf_cur] == '\0') // buffer end
-                eoc = 0;
 
             if (com_buf[buf_cur] == ' ' || com_buf[buf_cur] == ';' ||
             com_buf[buf_cur] == '&' || com_buf[buf_cur] == '<' ||
@@ -249,30 +292,53 @@ int parse(char *com_buf) {
                     com->output_opt = DEFAULT;
                 } else if (strcmp(sc, ">>") == 0) { // redirection(이어쓰기)
                     state = GET_OUTPUT_REDIRECTION;
-                    com->output_opt = CONTINUE;
+                    com->output_opt = APPEND;
                 } else if (strcmp(sc, ">|") == 0) { // redirection(force overwrite)
                     state = GET_OUTPUT_REDIRECTION;
                     com->output_opt = OVERWRITE;
                 } else if (strcmp(sc, "<") == 0) { // input redirection
                     state = GET_INPUT_REDIRECTION;
                 } else if (strcmp(sc, "|") == 0) { // pipe
-                    state = GET_PIPE;
-                } else if (strcmp(sc, "&") == 0) { // background실행
-                    com->amp = 1;
-                    execute(*com);
+                    if (pipe(com->pipefd) < 0) {
+                        perror("pipe error\n");
+                        exit(1);
+                    }
+                    execute(com, com_old);
+                    
+                    arg_cur = 0;
+                    com_old = com;
+                    com = malloc(sizeof(command));
+                    memset(com, 0, sizeof(command));
+
                     state = GET_COMMAND;
-                } else if (strcmp(sc, ";") == 0) { // 그냥 실행
-                    execute(*com);
+                } else if (strcmp(sc, "&") == 0) { // background
+                    com->amp = 1;
+                    execute(com, com_old);
+                    
+                    arg_cur = 0;
+                    com_old = com;
+                    com = malloc(sizeof(command));
+                    memset(com, 0, sizeof(command));
+
+                    state = GET_COMMAND;
+                } else if (strcmp(sc, ";") == 0) { //실행
+                    execute(com, com_old);
+
+                    arg_cur = 0;
+                    com_old = com;
+                    com = malloc(sizeof(command));
+                    memset(com, 0, sizeof(command));
+
                     state = GET_COMMAND;
                 }
+                if (com_buf[buf_cur] == '\0') {// buffer end
+                    eoc = 0;
+                    execute(com, com_old);
+                }
+
                 continue;
             }
 
-        case GET_PIPE: // current output is next command's input
-            if (pipe(com->pipefd) < 0) {
-                perror("pipe error\n");
-                exit(1);
-            }
         case GET_COMMAND:
             save_location = &com->program;
             break;
@@ -301,7 +367,7 @@ int parse(char *com_buf) {
                     *save_location = malloc(sizeof(char)*(buf_cur-start_cur));
                     strncpy(*save_location, com_buf+start_cur, buf_cur-start_cur);
                     arg_cur++;
-                } else  if (state == GET_ARGUMENT) arg_cur++;
+                } else if (state == GET_ARGUMENT) arg_cur++;
 
                 state = GET_SPECIAL_CHARACTER;
                 start_cur = buf_cur;
@@ -315,43 +381,89 @@ int parse(char *com_buf) {
     return retval;
 }
 
-int execute(command com) {
+int execute(command *com, command *com_old) {
     pid_t pid;
+    int status;
+    tcsetattr(0, TCSANOW, &old);
 
-    printf("amp : |%d|\n", com.amp);
-    printf("input_file_name : |%s|\n", com.input_file_name);
-    printf("output_opt : |%d|\n", com.output_opt);
-    printf("output_file_name : |%s|\n", com.output_file_name);
-    printf("program : |%s|\n", com.program);
+    if (com->program == NULL) {
+        goto end;
+    }
+
+    // printf("==============\namp : |%d|\n", com->amp);
+    // printf("input_file_name : |%s|\n", com->input_file_name);
+    // printf("output_opt : |%d|\n", com->output_opt);
+    // printf("output_file_name : |%s|\n", com->output_file_name);
+    // printf("pipefd : read|%d| write|%d|\n", com->pipefd[0], com->pipefd[1]);
+    // printf("program : |%s|\n", com->program);
     
-    for (int i=0; com.args[i] != (char*)NULL; i++)
-        printf("argment%d : |%s|\n", i, com.args[i]);
+    // for (int i=0; com->args[i] != (char*)NULL; i++)
+    //     printf("argment%d : |%s|\n", i, com->args[i]);
+    // printf("========================\n\n");
 
-    // if (strcmp(com.program, "exit") == 0) {
-    // } else if (strcmp(com.program, "cd") == 0) {
-    // } else if (strcmp(com.program, "history") == 0) {
-    // } else if (com.program[0] == '!') { // !
-    // } else if (strcmp(com.program, "set") == 0) { // set [+|-]o noclobber
-    // }
+    if (strcmp(com->program, "exit") == 0) {
+        run = 0;
+    } else if (strcmp(com->program, "cd") == 0) {
+        chdir(com->args[1]);
+    } else if (strcmp(com->program, "history") == 0) {
+        for(int i=0; i<his.count; i++) {
+            printf("%d\t%s\n", i+1, his_at(&his, i));
+        }
+    } else if (strcmp(com->program, "set") == 0) { // set [+|-]o noclobber
+        if (com->args[1][0] == '-') {
+            noclobber = 1;
+        } else {
+            noclobber = 0;
+        }
+    }
 
-    // if((pid = fork()) < 0) {
-    //     perror("fork error\n");
-    //     return -1;
-    // } else if (pid > 0) { // parent
-        
-    // } else { // child
-    //     if (com.input_file_name != NULL) {
-    //         int inputfd = open(com.input_file_name, O_RDONLY);
-    //         if (inputfd == -1) {
-    //             perror("input file not exist");
-    //             return -1;
-    //         } else {
+    if((pid = fork()) < 0) {
+        perror("fork error\n");
+        goto end;
+    } else if (pid > 0) { // parent
+        if (com->amp == 0) {
+            wait(&status);
+        }
+    } else { // child
+        if (com->input_file_name != NULL) { // < priority higher then pipe
+            int inputfd = open(com->input_file_name, O_RDONLY);
+            if (inputfd == -1) {
+                perror("input file open error");
+                goto end;
+            } else {
+                dup2(inputfd, 0); // change input fd
+            }
+        } else if (com_old->pipefd[0] != 0) { // pipe
+            dup2(com_old->pipefd[0], 0);
+        }
 
-    //         }
+        if (com->output_file_name != NULL) { // >, >>, >| priority higher then pipe
+            int flag = O_WRONLY | O_CREAT;
+            
+            // if set +o noclobber
+            if (noclobber)
+                flag |= O_EXCL;
 
-    //     }
-    //     execvp(com.program, com.args);
-    // }
-    
+            if (com->output_opt == APPEND) {
+                flag |= O_APPEND;
+            } else if (com->output_opt == OVERWRITE) {
+                flag &= ~O_EXCL;
+            }
+            int outputfd = open(com->output_file_name, flag);
+            if (outputfd == -1) {
+                perror("output file open error");
+                goto end;
+            } else {
+                dup2(outputfd, 1); // change input fd
+            }
+        } else if (com->pipefd[1] != 0) { // pipe
+            dup2(com->pipefd[1], 1);
+        }
+
+        execvp(com->program, com->args);
+    }
+end:
+    tcsetattr(0, TCSANOW, &new);
+    free(com_old);
     return 0;
 }
