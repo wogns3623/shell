@@ -1,0 +1,10 @@
+LICENSE
+Makefile
+README.md
+as
+as;
+log.txt
+main
+main.c
+main.exe
+main.o
