@@ -229,11 +229,10 @@ int parse(char *com_buf) {
         switch (state) {
         case GET_SPECIAL_CHARACTER:
 
-            if (com_buf[buf_cur] == '\0') { // buffer end
-                execute(*com);
+            if (com_buf[buf_cur] == '\0') // buffer end
                 eoc = 0;
-                break;
-            } else if (com_buf[buf_cur] == ' ' || com_buf[buf_cur] == ';' ||
+
+            if (com_buf[buf_cur] == ' ' || com_buf[buf_cur] == ';' ||
             com_buf[buf_cur] == '&' || com_buf[buf_cur] == '<' ||
             com_buf[buf_cur] == '>' || com_buf[buf_cur] == '|') {
                 break;
