@@ -1,27 +1,45 @@
 #include <sys/wait.h>
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <termios.h>
 
-#define BUF_SIZE 1024
+#define BUF_SIZE 4096
 #define ARG_SIZE 1024
 #define HIS_SIZE 1024
 
 typedef enum {
     GET_COMMAND = 0,
-    GET_ARGUMENT
+    GET_SPECIAL_CHARACTER,
+    GET_ARGUMENT,
+    GET_INPUT_REDIRECTION,
+    GET_OUTPUT_REDIRECTION,
+    GET_PIPE
 } parse_state;
 
-// 경로에 있는 프로그램 실행
-// 경로가 없다면 bin폴더에서 프로그램을 찾아봄
-// bin폴더에 없다면 시스템명령으로 처리함
+typedef enum {
+    DEFAULT = 0,
+    CONTINUE,
+    OVERWRITE
+} redir_opt;
+
+/**
+ * 경로에 있는 프로그램 실행
+ * 경로가 없다면 bin폴더에서 프로그램을 찾아봄
+ * bin폴더에 없다면 시스템명령으로 처리함
+ */
 typedef struct {
     char *program;
-    char *path;
-    char *args[1024];
+    char *input_file_name;
+    char *output_file_name;
+    redir_opt output_opt;
+    int pipefd[2];
+    int amp; // 1이면 백그라운드에서 실행 == 기다리지 않음
+    char *args[ARG_SIZE];
 } command;
 
 typedef struct {
@@ -30,7 +48,6 @@ typedef struct {
     char current[BUF_SIZE];
 } history;
 
-char com_buf[BUF_SIZE];
 history his;
 
 // FILE *logfile;
@@ -54,48 +71,48 @@ void cur_left() {
     fputc(91, stdout);
     fputc(68, stdout);
 }
-int getcom();
-int parse(int com_len);
-int execute();
+int getcom(char *com_buf);
+int parse(char *com_buf);
+int execute(command com);
 
 int main(int argc, char *argv[]) {
-    int run = 1, com_len;
+    int run = 1;
+    char com_buf[BUF_SIZE];
     // logfile = fopen("log.txt", "w");
 
-    // setting terminal
-    struct termios old, new;
-    tcgetattr(0, &old);
-    new = old;
-    new.c_lflag &= ~ICANON & ~ECHO;
-    tcsetattr(0, TCSANOW, &new);
-
     if (argc == 1) { // run shell
+        // setting terminal
+        struct termios old, new;
+        tcgetattr(0, &old);
+        new = old;
+        new.c_lflag &= ~ICANON & ~ECHO;
+        tcsetattr(0, TCSANOW, &new);
+
         while (run) {
             fputs("> ", stdout);
 
             fflush(stdout);
-            memset(com_buf, 0, BUF_SIZE);
+            memset(com_buf, 0, sizeof(char)*BUF_SIZE);
             his.cur = his.count;
 
-            com_len = getcom();
-            // parse(com_len);
-            // execute();
-
-            // system(command);
+            getcom(com_buf);
+            parse(com_buf);
         }
     } else { //execute input command
-
+        // printf("|%s|\n", argv[1]);
+        parse(argv[1]);
     }
 
     return 0;
 }
 
-int getcom() {
+int getcom(char *com_buf) {
     char buf;
     int buf_cur = 0, buf_len = 0;
 
     // 명령어 저장을 history[current_cursor]에 저장함
     while ((buf = fgetc(stdin)) !=  '\n') {
+        if (buf_len < BUF_SIZE) {
         switch (buf) {
         case 127: // backspace
             if (buf_len > 0) {
@@ -186,47 +203,156 @@ int getcom() {
             }
             break;
         }
+        }
     }
     fputc('\n', stdout);
-
     his_add(his, com_buf);
 
     return buf_len;
 }
 
-int parse(int com_len) {
-    int cur = 0;
+// 명령어가 남아있으면 1을 리턴
+// 문자열을 끝까지 처리했으면 0을 리턴
+int parse(char *com_buf) {
+    int eoc = 1;
+    int retval = 0;
+    int buf_cur = 0;
+    int arg_cur = 0;
+    int start_cur = buf_cur;
+    char **save_location;
     parse_state state = GET_COMMAND;
 
-    while (cur < com_len) {
+    command *com = malloc(sizeof(command));
+    memset(com, 0, sizeof(command));
+    
+    while (eoc) {
         switch (state) {
-        case GET_COMMAND:
-            if (com_buf[cur] == ' ') {
+        case GET_SPECIAL_CHARACTER:
+
+            if (com_buf[buf_cur] == '\0') { // buffer end
+                execute(*com);
+                eoc = 0;
+                break;
+            } else if (com_buf[buf_cur] == ' ' || com_buf[buf_cur] == ';' ||
+            com_buf[buf_cur] == '&' || com_buf[buf_cur] == '<' ||
+            com_buf[buf_cur] == '>' || com_buf[buf_cur] == '|') {
+                break;
+            } else { // non-special character
+                char *sc = malloc(sizeof(char)*(buf_cur-start_cur));
+                strncpy(sc, com_buf+start_cur, buf_cur-start_cur);
+                sc = strtok(sc, " ");
                 
+                start_cur = buf_cur;
+                if (sc == NULL) { // ' '
+                    state = GET_ARGUMENT;
+                } else if (strcmp(sc, ">") == 0) { // redirection
+                    state = GET_OUTPUT_REDIRECTION;
+                    com->output_opt = DEFAULT;
+                } else if (strcmp(sc, ">>") == 0) { // redirection(이어쓰기)
+                    state = GET_OUTPUT_REDIRECTION;
+                    com->output_opt = CONTINUE;
+                } else if (strcmp(sc, ">|") == 0) { // redirection(force overwrite)
+                    state = GET_OUTPUT_REDIRECTION;
+                    com->output_opt = OVERWRITE;
+                } else if (strcmp(sc, "<") == 0) { // input redirection
+                    state = GET_INPUT_REDIRECTION;
+                } else if (strcmp(sc, "|") == 0) { // pipe
+                    state = GET_PIPE;
+                } else if (strcmp(sc, "&") == 0) { // background실행
+                    com->amp = 1;
+                    execute(*com);
+                    state = GET_COMMAND;
+                } else if (strcmp(sc, ";") == 0) { // 그냥 실행
+                    execute(*com);
+                    state = GET_COMMAND;
+                }
+                continue;
             }
+
+        case GET_PIPE: // current output is next command's input
+            if (pipe(com->pipefd) < 0) {
+                perror("pipe error\n");
+                exit(1);
+            }
+        case GET_COMMAND:
+            save_location = &com->program;
             break;
 
         case GET_ARGUMENT:
+            save_location = &com->args[arg_cur];
             break;
 
-        case ';': // end of command
+        case GET_INPUT_REDIRECTION:
+            save_location = &com->input_file_name;
             break;
 
-        case '&': // end of command
-            break;
-
-        case '>':
-            break;
-
-        case '<':
-            break;
-
-        case '|':
-            break;
-        
-        default:
+        case GET_OUTPUT_REDIRECTION:
+            save_location = &com->output_file_name;
             break;
         }
-        cur++;
+        if (state != GET_SPECIAL_CHARACTER) {
+            if (com_buf[buf_cur] == '\0' || com_buf[buf_cur] == ' ' ||
+            com_buf[buf_cur] == ';' || com_buf[buf_cur] == '&' ||
+            com_buf[buf_cur] == '<' || com_buf[buf_cur] == '>' ||
+            com_buf[buf_cur] == '|') {
+                *save_location = malloc(sizeof(char)*(buf_cur-start_cur));
+                strncpy(*save_location, com_buf+start_cur, buf_cur-start_cur);
+                if (state == GET_COMMAND) {
+                    save_location = &com->args[arg_cur];
+                    *save_location = malloc(sizeof(char)*(buf_cur-start_cur));
+                    strncpy(*save_location, com_buf+start_cur, buf_cur-start_cur);
+                    arg_cur++;
+                } else  if (state == GET_ARGUMENT) arg_cur++;
+
+                state = GET_SPECIAL_CHARACTER;
+                start_cur = buf_cur;
+                buf_cur--;
+            }
+        }
+
+        buf_cur++;
     }
+
+    return retval;
+}
+
+int execute(command com) {
+    pid_t pid;
+
+    printf("amp : |%d|\n", com.amp);
+    printf("input_file_name : |%s|\n", com.input_file_name);
+    printf("output_opt : |%d|\n", com.output_opt);
+    printf("output_file_name : |%s|\n", com.output_file_name);
+    printf("program : |%s|\n", com.program);
+    
+    for (int i=0; com.args[i] != (char*)NULL; i++)
+        printf("argment%d : |%s|\n", i, com.args[i]);
+
+    // if (strcmp(com.program, "exit") == 0) {
+    // } else if (strcmp(com.program, "cd") == 0) {
+    // } else if (strcmp(com.program, "history") == 0) {
+    // } else if (com.program[0] == '!') { // !
+    // } else if (strcmp(com.program, "set") == 0) { // set [+|-]o noclobber
+    // }
+
+    // if((pid = fork()) < 0) {
+    //     perror("fork error\n");
+    //     return -1;
+    // } else if (pid > 0) { // parent
+        
+    // } else { // child
+    //     if (com.input_file_name != NULL) {
+    //         int inputfd = open(com.input_file_name, O_RDONLY);
+    //         if (inputfd == -1) {
+    //             perror("input file not exist");
+    //             return -1;
+    //         } else {
+
+    //         }
+
+    //     }
+    //     execvp(com.program, com.args);
+    // }
+    
+    return 0;
 }

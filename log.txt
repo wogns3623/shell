@@ -1,10 +1,13 @@
-LICENSE
-Makefile
-README.md
-as
-as;
-log.txt
-main
-main.c
-main.exe
-main.o
+total 4364
+-rw-r--r-- 1 Administrator 197121 548678 6월  15 22:01 05_signal_part1.pdf
+-rw-r--r-- 1 Administrator 197121  13096 6월  16 23:05 a.out
+drwxr-xr-x 1 Administrator 197121      0 6월  21 15:53 shell
+-rw-r--r-- 1 Administrator 197121   1816 6월  16 23:05 test.c
+-rw-r--r-- 1 Administrator 197121 554122 6월  15 22:01 이론_09_01_Signal_part2.pdf
+-rw-r--r-- 1 Administrator 197121 630585 6월  15 22:02 이론_09_02_Signal_part3.pdf
+-rw-r--r-- 1 Administrator 197121 559024 6월  15 22:02 이론_10_01_IPC using pipe_part1.pdf
+-rw-r--r-- 1 Administrator 197121 344574 6월  15 22:02 이론_10_02_IPC using pipe_part2.pdf
+-rw-r--r-- 1 Administrator 197121 466943 6월  15 22:02 이론_10_03_Advanced IPC_part1.pdf
+-rw-r--r-- 1 Administrator 197121 492622 6월  15 22:02 이론_11_01_Advanced IPC_part2.pdf
+-rw-r--r-- 1 Administrator 197121 383846 6월  15 22:02 이론_11_01_Advanced IPC_part3.pdf
+-rw-r--r-- 1 Administrator 197121 447458 6월  15 22:02 이론_12_01_Advanced IPC_part4.pdf
