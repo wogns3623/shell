@@ -25,9 +25,8 @@ typedef struct {
 } command;
 
 typedef struct {
-    int count, in, out, cursor;
+    int count, in, out, cur;
     char queue[HIS_SIZE][BUF_SIZE];
-    char modified_queue[HIS_SIZE][BUF_SIZE];
     char current[BUF_SIZE];
 } history;
 
@@ -36,16 +35,8 @@ history his;
 
 // FILE *logfile;
 
-void his_set(history his) {
-    memset(his.current, 0, sizeof(char)*BUF_SIZE);
-    his.cursor = his.count;
-}
-
-/**
- * add string to history queue
- */
 void his_add(history his, char* comm) {
-    his.queue[his.in] = comm;
+    strcpy(his.queue[his.in], comm);
     if (his.count == HIS_SIZE)
         his.out = (his.out+1)%HIS_SIZE;
     else 
@@ -53,54 +44,12 @@ void his_add(history his, char* comm) {
 
     his.in = (his.in+1)%HIS_SIZE;
 }
-
-/**
- * 0부터 his.count까지를 내부적으로 history.queue의 처음부터 끝까지 매핑시켜준다
- * his_at(0) = history.queue[his.out]
- * his_at(his.count-1) = history.queue[his.in-1]
- * his_at(his.count) = history.current;
- */
-char *his_at(char** array, int location) {
-    if (location > his.count) { // out of index error
-        perror("OUT OF INDEX ERROR");
-        exit(1);
-    } else if (location == his.count) {
-        return his.current;
-    } else { // 0~his.count-1;
-        return array[(his.out+location)%HIS_SIZE];
-    }
-}
-
-void his_cursor_up(history his) {
-    if (his.cursor > 0) {
-        // 만약 history.modified_queue[history.cur-1]이 NULL이라면 history.queue[history.cur-1]에서 복사해서 넣음
-        if (his_at(his.modified_queue, his.cursor-1) == NULL) {
-            strcpy(his_at(his.modified_queue, his.cursor-1), his_at(his.queue, his.cursor-1));
-        }
-        his.cursor--;
-    }
-}
-
-void his_cursor_down(history his) {
-    if (his.cursor < his.count) {
-        his.cursor++;
-    }
-}
-
-char *his_current(history his) {
-    if (his.cursor == his.count) {
-        return his.current;
-    else { // 0 <= his.cursor < his.count
-        return his.modified[his.cursor];
-    }
-}
-
-void cursor_right() {
+void cur_right() {
     fputc(27, stdout);
     fputc(91, stdout);
     fputc(67, stdout);
 }
-void cursor_left() {
+void cur_left() {
     fputc(27, stdout);
     fputc(91, stdout);
     fputc(68, stdout);
@@ -126,7 +75,7 @@ int main(int argc, char *argv[]) {
 
             fflush(stdout);
             memset(com_buf, 0, BUF_SIZE);
-            his_set(his);
+            his.cur = his.count;
 
             com_len = getcom();
             // parse(com_len);
@@ -145,7 +94,7 @@ int getcom() {
     char buf;
     int buf_cur = 0, buf_len = 0;
 
-    // 명령어 저장을 his_current(his)에 저장함
+    // 명령어 저장을 history[current_cursor]에 저장함
     while ((buf = fgetc(stdin)) !=  '\n') {
         switch (buf) {
         case 127: // backspace
@@ -153,9 +102,9 @@ int getcom() {
                 if (buf_cur == buf_len) {
                     com_buf[buf_cur--] = '\0';
                     buf_len--;
-                    cursor_left();
+                    cur_left();
                     fputc(' ', stdout);
-                    cursor_left();
+                    cur_left();
                 } else {
                     char tmp[buf_len-buf_cur];
                     strcpy(tmp, com_buf+buf_cur);
@@ -163,11 +112,11 @@ int getcom() {
                     buf_len--;
                     strcpy(com_buf+buf_cur, tmp);
 
-                    cursor_left();
+                    cur_left();
                     fputs(tmp, stdout);
                     fputc(' ', stdout);
                     for (int i = 0; i < buf_len-buf_cur+1; i++)
-                        cursor_left();
+                        cur_left();
                 }
             }
             break;
@@ -177,11 +126,10 @@ int getcom() {
                 buf = fgetc(stdin);
                 switch (buf) {
                 // 이전 명령어를 불러옴
+                // history배열에서 current로 불러옴
                 case 65: // up
-                    his_cursor_up(his);
                     break;
                 case 66: // down
-                    his_cursor_down(his);
                     break;
                 
                 // 줄의 임의 위치에 커서를 옮길 수 있어야 함
@@ -190,25 +138,25 @@ int getcom() {
                 // 버퍼의 커서도 같이 움직임
                 case 67: // right
                     if (buf_cur < buf_len) {
-                        cursor_right();
+                        cur_right();
                         buf_cur++;
                     }
                     break;
                 case 68: // left
                     if (buf_cur > 0) {
-                        cursor_left();
+                        cur_left();
                         buf_cur--;
                     }
                     break;
                 case 70: // end
                     while (buf_cur < buf_len) {
-                        cursor_right();
+                        cur_right();
                         buf_cur++;
                     }
                     break;
                 case 72: // home
                     while (buf_cur > 0) {
-                        cursor_left();
+                        cur_left();
                         buf_cur--;
                     }
                     break;
@@ -234,7 +182,7 @@ int getcom() {
                 fputs(tmp, stdout);
 
                 for (int i = 0; i < buf_len-buf_cur; i++)
-                    cursor_left();
+                    cur_left();
             }
             break;
         }
@@ -254,7 +202,7 @@ int parse(int com_len) {
         switch (state) {
         case GET_COMMAND:
             if (com_buf[cur] == ' ') {
-
+                
             }
             break;
 
@@ -275,7 +223,6 @@ int parse(int com_len) {
 
         case '|':
             break;
-
         
         default:
             break;
