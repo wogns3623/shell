@@ -161,12 +161,47 @@ int getcom(char *com_buf) {
                 // 이전 명령어를 불러옴
                 // history배열에서 current로 불러옴
                 case 65: // up
-                    // if (his.cur > 0) {
+                // printf("%d %d" );
+                    if (his.cur > 0) {
+                        for(int i=0; i<strlen(com_buf); i++) {
+                            cur_left();
+                        }
+                        for(int i=0; i<strlen(com_buf); i++) {
+                            printf(" ");
+                        }
+                        for(int i=0; i<strlen(com_buf); i++) {
+                            cur_left();
+                        }
 
-                    // }
+                        if (his.cur == his.count) {
+                            strcpy(his.current, com_buf);
+                        }
+                        his.cur--;
+                        strcpy(com_buf, his_at(&his, his.cur));
+                        buf_len = strlen(com_buf);
+                        printf("%s", com_buf);
+                        buf_cur = buf_len;
+
+                    }
                     break;
                 case 66: // down
+                    if (his.cur < his.count) {
+                        for(int i=0; i<strlen(com_buf); i++) {
+                            cur_left();
+                        }
+                        for(int i=0; i<strlen(com_buf); i++) {
+                            printf(" ");
+                        }
+                        for(int i=0; i<strlen(com_buf); i++) {
+                            cur_left();
+                        }
 
+                        his.cur++;
+                        strcpy(com_buf, his_at(&his, his.cur));
+                        buf_len = strlen(com_buf);
+                        printf("%s", com_buf);
+                        buf_cur = buf_len;
+                    }
                     break;
                 
                 // 줄의 임의 위치에 커서를 옮길 수 있어야 함
@@ -243,6 +278,10 @@ int parse(char *com_buf) {
     command *com = malloc(sizeof(command));
     memset(com_old, 0, sizeof(command));
     memset(com, 0, sizeof(command));
+
+    if (strlen(com_buf) == 0) {
+        return 0;
+    }
     
     //check !
 
@@ -256,16 +295,16 @@ int parse(char *com_buf) {
             for (i=1; '0' <= histmp[i] && histmp[i] <= '9'; i++);
             strncpy(location, histmp+1, i);
             char *token = his_at(&his, atoi(location)-1);
-            printf("|%s|\n", token);
+            // printf("|%s|\n", token);
             
             tmpbuf = malloc(sizeof(char)*strlen(histmp+i));
             strcpy(tmpbuf, histmp+i);
-            printf("|%s|\n", tmpbuf);
+            // printf("|%s|\n", tmpbuf);
 
             strcpy(histmp, token);
             strcat(histmp, tmpbuf);
-            printf("|%s|\n", histmp);
-            printf("|%s|\n", com_buf);
+            // printf("|%s|\n", histmp);
+            // printf("|%s|\n", com_buf);
         }
     }
     
