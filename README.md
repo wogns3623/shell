@@ -3,17 +3,16 @@
 
 ## To be implememted
 ### command
-- [ ] cd
-- [ ] history
+- [X] cd
+- [X] history
 
 
 ### function
 
 - [ ] shell script parsing
-  - [ ] redirection ( <, <<, >, >>, >| )
-  - [ ] &, &&, ;, |(pipe), || |&
-  - [ ] history search ( ! )
-  - [X] line splitting ( \ )
+  - [X] redirection ( <, <<, >, >>, >| )
+  - [X] &, |(pipe)
+  - [X] history search ( ! )
   - [ ] etc
 - [ ] file execute
 - [ ] argument processing
